@@ -2,6 +2,8 @@
 
 Projeto de estudo focado em **segurança e isolamento de sockets** usando Socket.IO, JWT e multi-tenancy.
 
+![screenshot](./public/screenshot.png)
+
 ## Objetivo
 
 Treinar e implementar boas práticas de segurança em aplicações real-time:
