@@ -204,7 +204,7 @@ io.on("connection", (socket) => {
     });
   });
 
-  socket.on("message", ({ to_user_id, to_canal_id, message }) => {
+  socket.on("message", ({ to_user_id, to_canal_id, to_departamento_id, message }) => {
     if (typeof message !== "string") {
       log("warn", "message rejected: invalid type", {
         socketId: socket.id,
@@ -223,7 +223,12 @@ io.on("connection", (socket) => {
       });
       return;
     }
-    if (!Number.isInteger(to_user_id) && !Number.isInteger(to_canal_id)) {
+    if (
+      !Number.isInteger(to_user_id) &&
+      !Number.isInteger(to_canal_id) &&
+      !Number.isInteger(to_departamento_id) &&
+      socket.user.role !== "admin"
+    ) {
       log("warn", "message rejected: no valid target", {
         socketId: socket.id,
         tenant: t,
@@ -233,45 +238,68 @@ io.on("connection", (socket) => {
       });
       return;
     }
+    // autorização simples: canal alvo precisa estar nos canais do usuário
+    if (Number.isInteger(to_canal_id) && to_canal_id > 0) {
+      if (!socket.user.canais.includes(to_canal_id) && socket.user.role !== "admin") {
+        log("warn", "message_denied", {
+          tenant: t,
+          userId: socket.user.id,
+          socketId: socket.id,
+          target: { canalId: to_canal_id },
+          tabId,
+          reason: "not_in_channel",
+        });
+        return;
+      }
+    }
+    if (Number.isInteger(to_departamento_id) && to_departamento_id > 0) {
+      if (!socket.user.departamentos.includes(to_departamento_id) && socket.user.role !== "admin") {
+        log("warn", "message_denied", {
+          tenant: t,
+          userId: socket.user.id,
+          socketId: socket.id,
+          target: { departamentoId: to_departamento_id },
+          reason: "not_in_department",
+        });
+        return;
+      }
+    }
+    // constrói payload da mensagem
     const payload = {
       from_user_id: socket.user.id,
       message,
       timestamp: Date.now(),
     };
     let emitter = null;
+    let target = null;
     if (Number.isInteger(to_user_id) && to_user_id > 0) {
       emitter = room.user(t, to_user_id);
-    } else if (
-      Number.isInteger(to_canal_id) &&
-      to_canal_id > 0 &&
-      (
-        // verifica se o usuário pertence ao canal ou é admin
-        socket.user.role === "admin" ||
-        socket.user.canais.includes(to_canal_id)
-      )
-    ) {
+      target = { userId: to_user_id };
+    } else if (Number.isInteger(to_canal_id) && to_canal_id > 0) {
       emitter = room.canal(t, to_canal_id);
+      target = { canalId: to_canal_id };
+    } else if (Number.isInteger(to_departamento_id) && to_departamento_id > 0) {
+      emitter = room.dept(t, to_departamento_id);
+      target = { departamentoId: to_departamento_id };
+    } else if (socket.user.role === "admin") {
+      // admin broadcast
+      emitter = room.tenant(t);
+      target = { broadcast: true };
     }
-    if (!emitter) {
-      log("warn", "message rejected: invalid target", {
-        socketId: socket.id,
-        tenant: t,
-        userId: socket.user.id,
-        to_user_id,
-        to_canal_id,
-      });
-      return;
-    }
+    if (!emitter) return;
+
     // envia ignorando o remetente
     socket.to(emitter).emit("message", payload);
+
+    // notifica o remetente que a mensagem foi enviada
     socket.emit("message:sent", payload);
-    log("info", "message sent", {
-      socketId: socket.id,
+
+    // auditoria (metadados)
+    log("info", "message_sent", {
       tenant: t,
-      fromUserId: socket.user.id,
-      toUserId: to_user_id,
-      toCanalId: to_canal_id,
-      messageLength: message.length,
+      userId: socket.user.id,
+      socketId: socket.id,
+      target,
     });
   });
 
