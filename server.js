@@ -166,8 +166,12 @@ io.on("connection", (socket) => {
   socket.on("ping", () => socket.emit("pong", Date.now()));
 
   socket.on("message", ({ to_user_id, to_canal_id, message }) => {
-    if (typeof message !== "string") return;
-    if (message.length > 500) return;
+    if (typeof message !== "string") {
+      return;
+    }
+    if (message.length > 500) {
+      return;
+    }
     if (!Number.isInteger(to_user_id) && !Number.isInteger(to_canal_id)) {
       return;
     }
@@ -182,10 +186,12 @@ io.on("connection", (socket) => {
     } else if (Number.isInteger(to_canal_id) && to_canal_id > 0) {
       emitter = room.canal(t, to_canal_id);
     }
-    if (emitter) {
-      // envia ignorando o remetente
-      socket.to(emitter).emit("message", payload);
+    if (!emitter) {
+      return;
     }
+    // envia ignorando o remetente
+    socket.to(emitter).emit("message", payload);
+    socket.emit("message:sent", payload);
   });
 
   socket.on("disconnect", (reason) => {

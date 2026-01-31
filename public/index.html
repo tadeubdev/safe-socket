@@ -330,7 +330,6 @@
         tabId
       };
       socket.emit("message", payload);
-      log("message:sent", payload);
       saveSettings();
     }
 
