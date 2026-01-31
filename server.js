@@ -87,7 +87,7 @@ function attachRateLimit(socket, { windowMs = 1000, max = 25 } = {}) {
     count++;
     if (count > max) {
       const user = socket.user || {};
-      log("warn", "rate limit exceeded", {
+      log("warn", "rate_limit.exceeded", {
         socketId: socket.id,
         maxPerSec: max,
         tenant: user.tenant,
@@ -111,7 +111,7 @@ io.use((socket, next) => {
       socket.handshake.headers?.authorization?.replace(/^Bearer\s+/i, "");
 
     if (!token) {
-      log("warn", "auth failed: no token", { socketId: socket.id });
+      log("warn", "auth.failed.no_token", { socketId: socket.id });
       return next(new Error("unauthorized"));
     }
 
@@ -122,11 +122,11 @@ io.use((socket, next) => {
     const userId = claims.sub;
 
     if (!tenant) {
-      log("warn", "auth failed: tenant missing", { socketId: socket.id, claims });
+      log("warn", "auth.failed.tenant_missing", { socketId: socket.id });
       return next(new Error("tenant_missing"));
     }
     if (!userId) {
-      log("warn", "auth failed: sub missing", { socketId: socket.id, tenant });
+      log("warn", "auth.failed.user_id_missing", { socketId: socket.id, tenant });
       return next(new Error("sub_missing"));
     }
 
@@ -145,12 +145,11 @@ io.use((socket, next) => {
 
     next();
   } catch (e) {
-    log("warn", "auth failed: jwt error", {
+    log("error", "auth.failed.invalid_jwt", {
       socketId: socket.id,
       error: e.message,
       ip: socket.handshake.address,
       ua: socket.handshake.headers["user-agent"],
-      reason: "unauthorized",
     });
     next(new Error("unauthorized"));
   }
@@ -186,18 +185,19 @@ io.on("connection", (socket) => {
     role: socket.user.role,
   });
 
-  log("info", "socket connected", {
+  log("audit", "connection.established", {
     socketId: socket.id,
     tenant: t,
     userId: socket.user.id,
     role: socket.user.role,
+    ip: socket.handshake.address,
   });
 
   // ======== Eventos do client (exemplos seguros) ========
 
   socket.on("ping", () => {
     socket.emit("pong", Date.now());
-    log("debug", "ping received", {
+    log("debug", "message.ping", {
       socketId: socket.id,
       tenant: t,
       userId: socket.user.id,
@@ -206,7 +206,7 @@ io.on("connection", (socket) => {
 
   socket.on("message", ({ to_user_id, to_canal_id, to_departamento_id, message }) => {
     if (typeof message !== "string") {
-      log("warn", "message rejected: invalid type", {
+      log("warn", "message.rejected.invalid_type", {
         socketId: socket.id,
         tenant: t,
         userId: socket.user.id,
@@ -215,7 +215,7 @@ io.on("connection", (socket) => {
       return;
     }
     if (message.length > 500) {
-      log("warn", "message rejected: too long", {
+      log("warn", "message.rejected.too_long", {
         socketId: socket.id,
         tenant: t,
         userId: socket.user.id,
@@ -229,37 +229,35 @@ io.on("connection", (socket) => {
       !Number.isInteger(to_departamento_id) &&
       socket.user.role !== "admin"
     ) {
-      log("warn", "message rejected: no valid target", {
+      log("warn", "message.rejected.no_target", {
         socketId: socket.id,
         tenant: t,
         userId: socket.user.id,
         to_user_id,
         to_canal_id,
+        to_departamento_id,
       });
       return;
     }
     // autorização simples: canal alvo precisa estar nos canais do usuário
     if (Number.isInteger(to_canal_id) && to_canal_id > 0) {
       if (!socket.user.canais.includes(to_canal_id) && socket.user.role !== "admin") {
-        log("warn", "message_denied", {
+        log("warn", "message.denied.channel_unauthorized", {
+          socketId: socket.id,
           tenant: t,
           userId: socket.user.id,
-          socketId: socket.id,
-          target: { canalId: to_canal_id },
-          tabId,
-          reason: "not_in_channel",
+          canalId: to_canal_id,
         });
         return;
       }
     }
     if (Number.isInteger(to_departamento_id) && to_departamento_id > 0) {
       if (!socket.user.departamentos.includes(to_departamento_id) && socket.user.role !== "admin") {
-        log("warn", "message_denied", {
+        log("warn", "message.denied.department_unauthorized", {
+          socketId: socket.id,
           tenant: t,
           userId: socket.user.id,
-          socketId: socket.id,
-          target: { departamentoId: to_departamento_id },
-          reason: "not_in_department",
+          departamentoId: to_departamento_id,
         });
         return;
       }
@@ -294,12 +292,13 @@ io.on("connection", (socket) => {
     // notifica o remetente que a mensagem foi enviada
     socket.emit("message:sent", payload);
 
-    // auditoria (metadados)
-    log("info", "message_sent", {
+    // auditoria
+    log("audit", "message.sent", {
+      socketId: socket.id,
       tenant: t,
       userId: socket.user.id,
-      socketId: socket.id,
       target,
+      messageLength: message.length,
     });
   });
 
@@ -310,7 +309,7 @@ io.on("connection", (socket) => {
       connectionDuration = (((logoutAt - socket.loggedAt) / 1000) / 60).toFixed(2); // em minutos
     }
 
-    log("info", "socket disconnected", {
+    log("audit", "connection.closed", {
       socketId: socket.id,
       tenant: t,
       userId: socket.user.id,
@@ -328,5 +327,5 @@ app.get("/", (req, res) => {
 });
 
 server.listen(PORT, () => {
-  log("info", "server started", { port: PORT });
+  log("info", "server.started", { port: PORT });
 });
