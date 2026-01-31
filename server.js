@@ -85,7 +85,7 @@ function attachRateLimit(socket, { windowMs = 1000, max = 25 } = {}) {
     if (count > max) {
       // emite warning
       console.warn(`[rate-limit] Socket ${socket.id} exceeded rate limit (${max} msgs/sec)`);
-      return;
+      return next(new Error("rate_limit_exceeded"));
     }
     next();
   });
