@@ -241,7 +241,15 @@ io.on("connection", (socket) => {
     let emitter = null;
     if (Number.isInteger(to_user_id) && to_user_id > 0) {
       emitter = room.user(t, to_user_id);
-    } else if (Number.isInteger(to_canal_id) && to_canal_id > 0) {
+    } else if (
+      Number.isInteger(to_canal_id) &&
+      to_canal_id > 0 &&
+      (
+        // verifica se o usuário pertence ao canal ou é admin
+        socket.user.role === "admin" ||
+        socket.user.canais.includes(to_canal_id)
+      )
+    ) {
       emitter = room.canal(t, to_canal_id);
     }
     if (!emitter) {
