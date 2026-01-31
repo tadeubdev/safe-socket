@@ -7,6 +7,18 @@ const jwt = require("jsonwebtoken");
 const { Server } = require("socket.io");
 const path = require("path");
 
+// ============ Logger ============
+function log(level, msg, fields = {}) {
+  const line = {
+    ts: new Date().toISOString(),
+    level,
+    msg,
+    service: "socket-server",
+    ...fields,
+  };
+  console.log(JSON.stringify(line));
+}
+
 // ============ Config ============
 const PORT = Number(process.env.PORT || 8082);
 const JWT_SECRET = process.env.JWT_SECRET;
@@ -61,15 +73,6 @@ const room = {
   user: (t, id) => `t:${t}:user:${id}`,
 };
 
-// Extrai hostname do Origin
-function originHost(origin) {
-  try {
-    return new URL(origin).hostname.toLowerCase();
-  } catch {
-    return null;
-  }
-}
-
 // Rate limit simples por socket (por segundo)
 function attachRateLimit(socket, { windowMs = 1000, max = 25 } = {}) {
   let count = 0;
@@ -83,8 +86,13 @@ function attachRateLimit(socket, { windowMs = 1000, max = 25 } = {}) {
     }
     count++;
     if (count > max) {
-      // emite warning
-      console.warn(`[rate-limit] Socket ${socket.id} exceeded rate limit (${max} msgs/sec)`);
+      const user = socket.user || {};
+      log("warn", "rate limit exceeded", {
+        socketId: socket.id,
+        maxPerSec: max,
+        tenant: user.tenant,
+        userId: user.id,
+      });
       return next(new Error("rate_limit_exceeded"));
     }
     next();
@@ -102,7 +110,10 @@ io.use((socket, next) => {
       socket.handshake.auth?.token ||
       socket.handshake.headers?.authorization?.replace(/^Bearer\s+/i, "");
 
-    if (!token) return next(new Error("unauthorized"));
+    if (!token) {
+      log("warn", "auth failed: no token", { socketId: socket.id });
+      return next(new Error("unauthorized"));
+    }
 
     const claims = jwt.verify(token, JWT_SECRET);
 
@@ -110,8 +121,14 @@ io.use((socket, next) => {
     const tenant = normalizeTenant(claims.tenant);
     const userId = claims.sub;
 
-    if (!tenant) return next(new Error("tenant_missing"));
-    if (!userId) return next(new Error("sub_missing"));
+    if (!tenant) {
+      log("warn", "auth failed: tenant missing", { socketId: socket.id, claims });
+      return next(new Error("tenant_missing"));
+    }
+    if (!userId) {
+      log("warn", "auth failed: sub missing", { socketId: socket.id, tenant });
+      return next(new Error("sub_missing"));
+    }
 
     // Anexa identidade "confiável" no socket
     socket.user = {
@@ -124,8 +141,17 @@ io.use((socket, next) => {
       operadorId: Number.isInteger(claims.operador_id) ? claims.operador_id : null,
     };
 
+    socket.loggedAt = Date.now();
+
     next();
   } catch (e) {
+    log("warn", "auth failed: jwt error", {
+      socketId: socket.id,
+      error: e.message,
+      ip: socket.handshake.address,
+      ua: socket.handshake.headers["user-agent"],
+      reason: "unauthorized",
+    });
     next(new Error("unauthorized"));
   }
 });
@@ -160,19 +186,51 @@ io.on("connection", (socket) => {
     role: socket.user.role,
   });
 
+  log("info", "socket connected", {
+    socketId: socket.id,
+    tenant: t,
+    userId: socket.user.id,
+    role: socket.user.role,
+  });
+
   // ======== Eventos do client (exemplos seguros) ========
 
-  // Ping/pong (útil pra debug)
-  socket.on("ping", () => socket.emit("pong", Date.now()));
+  socket.on("ping", () => {
+    socket.emit("pong", Date.now());
+    log("debug", "ping received", {
+      socketId: socket.id,
+      tenant: t,
+      userId: socket.user.id,
+    });
+  });
 
   socket.on("message", ({ to_user_id, to_canal_id, message }) => {
     if (typeof message !== "string") {
+      log("warn", "message rejected: invalid type", {
+        socketId: socket.id,
+        tenant: t,
+        userId: socket.user.id,
+        messageType: typeof message,
+      });
       return;
     }
     if (message.length > 500) {
+      log("warn", "message rejected: too long", {
+        socketId: socket.id,
+        tenant: t,
+        userId: socket.user.id,
+        length: message.length,
+      });
       return;
     }
     if (!Number.isInteger(to_user_id) && !Number.isInteger(to_canal_id)) {
+      log("warn", "message rejected: no valid target", {
+        socketId: socket.id,
+        tenant: t,
+        userId: socket.user.id,
+        to_user_id,
+        to_canal_id,
+      });
       return;
     }
     const payload = {
@@ -187,15 +245,42 @@ io.on("connection", (socket) => {
       emitter = room.canal(t, to_canal_id);
     }
     if (!emitter) {
+      log("warn", "message rejected: invalid target", {
+        socketId: socket.id,
+        tenant: t,
+        userId: socket.user.id,
+        to_user_id,
+        to_canal_id,
+      });
       return;
     }
     // envia ignorando o remetente
     socket.to(emitter).emit("message", payload);
     socket.emit("message:sent", payload);
+    log("info", "message sent", {
+      socketId: socket.id,
+      tenant: t,
+      fromUserId: socket.user.id,
+      toUserId: to_user_id,
+      toCanalId: to_canal_id,
+      messageLength: message.length,
+    });
   });
 
   socket.on("disconnect", (reason) => {
-    console.log(`[socket] disconnected ${socket.id} (${reason})`);
+    let connectionDuration = null;
+    if (socket.loggedAt) {
+      const logoutAt = Date.now();
+      connectionDuration = (((logoutAt - socket.loggedAt) / 1000) / 60).toFixed(2); // em minutos
+    }
+
+    log("info", "socket disconnected", {
+      socketId: socket.id,
+      tenant: t,
+      userId: socket.user.id,
+      durationMin: connectionDuration,
+      reason,
+    });
   });
 });
 
@@ -207,5 +292,5 @@ app.get("/", (req, res) => {
 });
 
 server.listen(PORT, () => {
-  console.log(`[socket] listening on :${PORT}`);
+  log("info", "server started", { port: PORT });
 });
