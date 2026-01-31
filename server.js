@@ -166,6 +166,11 @@ io.on("connection", (socket) => {
   socket.on("ping", () => socket.emit("pong", Date.now()));
 
   socket.on("message", ({ to_user_id, to_canal_id, message }) => {
+    if (typeof message !== "string") return;
+    if (message.length > 500) return;
+    if (!Number.isInteger(to_user_id) && !Number.isInteger(to_canal_id)) {
+      return;
+    }
     const payload = {
       from_user_id: socket.user.id,
       message,
