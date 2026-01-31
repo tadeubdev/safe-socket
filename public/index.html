@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Socket Tester</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+    }
+    body {
+      margin: 0;
+      background: #0b0f14;
+      color: #e6edf3;
+    }
+    header {
+      padding: 16px 20px;
+      border-bottom: 1px solid #1f2a37;
+      background: #0f141b;
+      position: sticky;
+      top: 0;
+      z-index: 1;
+    }
+    h1 {
+      margin: 0;
+      font-size: 18px;
+      font-weight: 600;
+    }
+    main {
+      padding: 20px;
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 16px;
+    }
+    .card {
+      border: 1px solid #1f2a37;
+      background: #0f141b;
+      border-radius: 12px;
+      padding: 16px;
+    }
+    label {
+      display: block;
+      font-size: 12px;
+      color: #9aa4b2;
+      margin-bottom: 6px;
+    }
+    input, textarea, button {
+      width: 100%;
+      padding: 10px 12px;
+      border-radius: 8px;
+      border: 1px solid #2a3645;
+      background: #0b0f14;
+      color: #e6edf3;
+      font-size: 14px;
+      box-sizing: border-box;
+    }
+    textarea { min-height: 90px; resize: vertical; }
+    .row {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 12px;
+    }
+    .actions {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+      gap: 10px;
+      margin-top: 10px;
+    }
+    button {
+      cursor: pointer;
+      background: #1f6feb;
+      border-color: #1f6feb;
+      font-weight: 600;
+    }
+    button.secondary {
+      background: #111827;
+      border-color: #2a3645;
+      color: #e6edf3;
+    }
+    button.danger {
+      background: #b42318;
+      border-color: #b42318;
+    }
+    .status {
+      display: inline-flex;
+      gap: 8px;
+      align-items: center;
+      font-size: 12px;
+      color: #9aa4b2;
+    }
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #ef4444;
+    }
+    .dot.on { background: #22c55e; }
+    .log {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 12px;
+      line-height: 1.4;
+      white-space: pre-wrap;
+      background: #0b0f14;
+      border: 1px solid #1f2a37;
+      border-radius: 8px;
+      padding: 10px;
+      min-height: 180px;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Socket Tester</h1>
+  </header>
+  <main>
+    <section class="card">
+      <div class="row">
+        <div>
+          <label for="serverUrl">URL do servidor Socket.IO</label>
+          <input id="serverUrl" placeholder="http://localhost:8082" />
+        </div>
+        <div>
+          <label for="token">JWT (claims.tenant + claims.sub)</label>
+          <input id="token" placeholder="cole o token aqui" />
+        </div>
+      </div>
+      <div class="actions">
+        <button id="connectBtn">Conectar</button>
+        <button id="disconnectBtn" class="secondary">Desconectar</button>
+        <button id="pingBtn" class="secondary">Enviar ping</button>
+        <button id="clearBtn" class="danger">Limpar log</button>
+      </div>
+      <div style="margin-top: 12px; display:flex; justify-content: space-between; align-items:center;">
+        <div class="status">
+          <span class="dot" id="statusDot"></span>
+          <span id="statusText">desconectado</span>
+        </div>
+        <div class="status">
+          <span>Tab ID:</span>
+          <span id="tabId"></span>
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <label for="log">Eventos</label>
+      <div id="log" class="log"></div>
+    </section>
+
+    <section class="card">
+      <div class="row">
+        <div>
+          <label for="messageUserId">User id</label>
+          <input id="messageUserId" placeholder="user id" />
+        </div>
+        <div>
+          <label for="messageChannelId">Canal ID</label>
+          <input id="messageChannelId" placeholder="canal id" />
+        </div>
+        <div>
+          <label for="messageText">Mensagem</label>
+          <input id="messageText" placeholder="texto da mensagem" />
+        </div>
+      </div>
+      <div class="actions">
+        <button id="sendMessageBtn" class="secondary">Enviar message</button>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const serverUrlInput = document.getElementById("serverUrl");
+    const tokenInput = document.getElementById("token");
+    const connectBtn = document.getElementById("connectBtn");
+    const disconnectBtn = document.getElementById("disconnectBtn");
+    const pingBtn = document.getElementById("pingBtn");
+    const clearBtn = document.getElementById("clearBtn");
+    const statusDot = document.getElementById("statusDot");
+    const statusText = document.getElementById("statusText");
+    const logEl = document.getElementById("log");
+    const tabIdEl = document.getElementById("tabId");
+    const messageUserIdInput = document.getElementById("messageUserId");
+    const messageChannelIdInput = document.getElementById("messageChannelId");
+    const messageTextInput = document.getElementById("messageText");
+    const sendMessageBtn = document.getElementById("sendMessageBtn");
+
+    const tabId = crypto.randomUUID();
+    tabIdEl.textContent = tabId;
+
+    const STORAGE_KEY = "socket-tester-settings";
+    const saved = JSON.parse(sessionStorage.getItem(STORAGE_KEY) || "{}");
+
+    serverUrlInput.value = saved.serverUrl || "http://localhost:8082";
+    tokenInput.value = saved.token || "";
+    messageUserIdInput.value = saved.messageUserId || "";
+    messageChannelIdInput.value = saved.messageChannelId || "";
+    messageTextInput.value = saved.messageText || "";
+
+    // se tiver o token salvo, tenta conectar automaticamente
+    if (saved.token) {
+      connect();
+    }
+
+    function saveSettings() {
+      sessionStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify({
+          serverUrl: serverUrlInput.value.trim(),
+          token: tokenInput.value.trim(),
+          messageUserId: messageUserIdInput.value.trim(),
+          messageChannelId: messageChannelIdInput.value.trim(),
+          messageText: messageTextInput.value.trim(),
+        })
+      );
+    }
+
+    function log(message, data) {
+      const time = new Date().toISOString();
+      const line = data === undefined
+        ? `[${time}] ${message}`
+        : `[${time}] ${message} ${JSON.stringify(data)}`;
+      logEl.textContent = `${line}\n${logEl.textContent}`;
+    }
+
+    function setStatus(connected) {
+      statusDot.classList.toggle("on", connected);
+      statusText.textContent = connected ? "conectado" : "desconectado";
+    }
+
+    let socket = null;
+
+    function ensureClientScript(url) {
+      return new Promise((resolve, reject) => {
+        if (window.io) return resolve();
+        const script = document.createElement("script");
+        script.src = `${url.replace(/\/$/, "")}/socket.io/socket.io.js`;
+        script.async = true;
+        script.onload = () => resolve();
+        script.onerror = () => reject(new Error("Falha ao carregar socket.io.js"));
+        document.head.appendChild(script);
+      });
+    }
+
+    async function connect() {
+      saveSettings();
+      const url = serverUrlInput.value.trim();
+      const token = tokenInput.value.trim();
+      if (!url || !token) {
+        log("Preencha URL e token");
+        return;
+      }
+
+      try {
+        await ensureClientScript(url);
+      } catch (e) {
+        log(e.message);
+        return;
+      }
+
+      if (socket) {
+        socket.disconnect();
+        socket = null;
+      }
+
+      socket = io(url, {
+        transports: ["websocket"],
+        auth: { token },
+      });
+
+      socket.on("connect", () => {
+        setStatus(true);
+        log("connect", { id: socket.id, tabId });
+      });
+
+      socket.on("ready", (payload) => log("ready", payload));
+      socket.on("pong", (payload) => log("pong", payload));
+
+      socket.onAny((event, payload) => {
+        if (["ready", "pong"].includes(event)) return;
+        log(`event:${event}`, payload);
+      });
+
+      socket.on("disconnect", (reason) => {
+        setStatus(false);
+        log("disconnect", reason);
+      });
+
+      socket.on("connect_error", (err) => {
+        setStatus(false);
+        log("connect_error", err?.message || err);
+      });
+    }
+
+    function disconnect() {
+      if (!socket) return;
+      socket.disconnect();
+      socket = null;
+    }
+
+    function ping() {
+      if (!socket || !socket.connected) {
+        log("socket não conectado");
+        return;
+      }
+      socket.emit("ping");
+      log("ping");
+    }
+
+    function sendMessage() {
+      if (!socket || !socket.connected) {
+        log("socket não conectado");
+        return;
+      }
+      const userId = messageUserIdInput.value.trim();
+      const channelId = messageChannelIdInput.value.trim();
+      const message = messageTextInput.value.trim();
+      if (!userId && !channelId) {
+        log("informe o userId ou canalId na mensagem");
+        return;
+      }
+      if (userId && channelId) {
+        log("informe apenas userId ou canalId na mensagem");
+        return;
+      }
+      const payload = {
+        to_user_id: Number(userId),
+        to_canal_id: Number(channelId),
+        message,
+        tabId
+      };
+      socket.emit("message", payload);
+      log("message:sent", payload);
+      saveSettings();
+    }
+
+    connectBtn.addEventListener("click", connect);
+    disconnectBtn.addEventListener("click", disconnect);
+    pingBtn.addEventListener("click", ping);
+    clearBtn.addEventListener("click", () => (logEl.textContent = ""));
+    sendMessageBtn.addEventListener("click", sendMessage);
+
+    setStatus(false);
+  </script>
+</body>
+</html>
